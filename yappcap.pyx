@@ -108,6 +108,34 @@ cdef class Pcap(object):
         else:
             raise PcapError("Unknown error")
 
+
+    def next_ex(self):
+        """Get the next available PcapPacket (ex)"""
+        cdef PcapPacket pkt
+        cdef pcap_pkthdr *hdr
+        cdef const_uchar_ptr data
+
+        if not self.activated:
+            raise PcapErrorNotActivated()
+
+        res = pcap_next_ex(self.__pcap, &hdr, &data)
+        if res == -1:
+            raise PcapError(pcap_geterr(self.__pcap))
+        if res == -2:
+            raise StopIteration
+        IF not PCAP_V0:
+            if res == PCAP_ERROR_NOT_ACTIVATED:
+                raise PcapErrorNotActivated() # This is undocumented, but happens
+        if res >= 0:
+            pkt = PcapPacket_factory(hdr, data)
+            if self.__dumper:
+                self.__dumper.dump(pkt)
+            return pkt
+        else:
+            raise PcapError("Unknown error")
+
+
+
     cdef __loop_common(self, looptype, count, callback, args, kwargs):
         cdef pcap_callback_ctx ctx
 
@@ -413,6 +441,20 @@ cdef class PcapLive(Pcap):
         """
         def __get__(self):
             res = pcap_fileno(self.__pcap)
+            if res == -1:
+                # With a live file capture, this should only happen when not activated
+                raise PcapErrorNotActivated()
+            return res
+
+    property selectable_fd:
+        """get a file descriptor on which a select() can be done for a live capture (read-only)
+
+        Raises:
+            PcapError, PcapErrorNotActivated
+
+        """
+        def __get__(self):
+            res = pcap_get_selectable_fd(self.__pcap)
             if res == -1:
                 # With a live file capture, this should only happen when not activated
                 raise PcapErrorNotActivated()
